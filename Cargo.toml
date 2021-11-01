@@ -1,0 +1,43 @@
+[package]
+name = "rust-websocket2"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[[bin]]
+name = "standalone"
+path = "bin/standalone.rs"
+
+# [[bin]]
+# name = "clustered"
+# path = "bin/clustered.rs"
+
+[lib]
+name = "websocket"
+path = "src/lib.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures-util = "0.3.14"
+tokio-tungstenite = "0.15"
+pretty_env_logger = "0.4"
+
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive", "rc"] }
+jsonwebtoken = "7"
+log = "0.4"
+
+tokio = { version = "1", features = ["full"] }
+warp = "0.3"
+futures = "0.3.17"
+
+async-trait = "0.1"
+hyperid = { version = "2", features = ["url_safe"] }
+
+redis = { version = "0.21", features = ["tokio-comp"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = "0.23"

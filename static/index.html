@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<body>
+  <p>
+    <span>
+      <h1>Y<small>ac is </small>A<small>nother </small>C<small>hat</small></h1>
+    </span>
+  </p>
+
+<input id="username" name="username" value="pippo" />
+<input id="password" name="password" value="pippo" />
+<button id="login">Login</button>
+
+<hr />
+
+<input id="chat-name" name="chat-name"/>
+<button id="create-chat">Create chat</button>
+
+<button id="load-chats">Load chats</button>
+<ul id="chats"></ul>
+
+<hr />
+
+<input id="message-text" name="message-text">
+<button id="send-message">Send</button>
+
+<script>
+    let sock
+    let user_jwt;
+    let user_id;
+
+    async function login(username, password) {
+      const response = await fetch('/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, password })
+      })
+
+      if (response.status !== 200) {
+        throw new Error('Invalid http response')
+      }
+      const json = await response.json()
+
+      user_id = username
+
+      return json
+    }
+    document.getElementById('login').onclick = function () {
+      const username = document.getElementById('username').value
+      const password = document.getElementById('password').value
+      login(username, password)
+        .then(({ jwt }) => { user_jwt = jwt }, () => { user_jwt = undefined })
+        .then(() => connectWebsock(user_jwt))
+    }
+
+    async function createChat(jwt, name) {
+      const response = await fetch('/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + jwt,
+        },
+        body: JSON.stringify({ name })
+      })
+
+      if (response.status !== 200) {
+        throw new Error('Invalid http response')
+      }
+      const json = await response.json()
+
+      return json
+    }
+    document.getElementById('create-chat').onclick = function () {
+      const name = document.getElementById('chat-name').value
+      createChat(user_jwt, name)
+        .then(() => loadChats(user_jwt))
+        .then(chats => displayChats(chats))
+    }
+
+    async function loadChats(jwt) {
+      const response = await fetch('/chat', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + jwt
+        }
+      })
+      if (response.status !== 200) {
+        throw new Error('Invalid http response')
+      }
+      const json = await response.json()
+
+      return json
+    }
+    function displayChats(chats) {
+      const ul = document.getElementById('chats')
+      ul.innerHTML = chats.map(c => `<li>${JSON.stringify(c)}<button data-chat-id="${c.id}">Join</button></li>`)
+    }
+    document.getElementById('load-chats').onclick = function () {
+      loadChats(user_jwt)
+        .then(chats => displayChats(chats))
+    }
+
+    let chat_id
+    document.getElementById('chats').onclick = function (e) {
+      let li = e.target;
+      let chatId = li.getAttribute('data-chat-id')
+      chat_id = chatId
+
+      let body = { type: 'JoinChat', chat_id: chatId, user_id }
+
+      send(JSON.stringify(body))
+    }
+
+    document.getElementById('send-message').onclick = function () {
+      const text = document.getElementById('message-text').value
+
+      let body = { type: 'Publish', chat_id, writer_id: user_id, text }
+
+      send(JSON.stringify(body))
+    }
+
+    function connectWebsock(jwt) {
+        sock = new WebSocket("ws://" + window.location.host + '/ws?jwt=' + user_jwt);
+        sock.onopen = recv.bind(window, "Connected");
+        sock.onclose = recv.bind(window, "Disconnected");
+        sock.onmessage = function(msg) { recv(msg.data) };
+        sock.onerror = function(err) { recv("Error: " + err); };
+    }
+    function recv(msg) {
+      const o = JSON.parse(msg)
+      var e = document.createElement("PRE");
+      e.innerText = `${o.chat_id} ${o.writer_id}: ${o.text}`;
+      document.body.appendChild(e);
+    }
+    function send(msg) {
+        sock.send(msg);
+    }
+</script>
+</body>
