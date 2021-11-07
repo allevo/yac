@@ -145,7 +145,7 @@ mod tests {
 
     use crate::{
         chat_service::Chat,
-        web_service::handlers::{CreateChatRequest, LoginRequest, LoginResponse},
+        web_service::http_handlers::{CreateChatRequest, LoginRequest, LoginResponse},
         ws_pool::{PublishedMessage, SendMessageInChat},
     };
 
@@ -153,7 +153,7 @@ mod tests {
     use helper::*;
 
     #[tokio::test]
-    async fn test_post() {
+    async fn test_flow() {
         pretty_env_logger::try_init().ok();
 
         let (to_redis_sender, to_redis_receiver) =
