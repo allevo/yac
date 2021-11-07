@@ -28,7 +28,7 @@ impl CredentialService {
         &self,
         username: String,
         password: String,
-    ) -> Result<String, CredentialServiceError> {
+    ) -> Result<(UserId, String), CredentialServiceError> {
         let user_id = self
             .db
             .iter()
@@ -38,7 +38,7 @@ impl CredentialService {
 
         user_id.and_then(|user_id| {
             let claims = Claims {
-                sub: user_id.0,
+                sub: user_id.clone().0,
                 exp: 10000000000,
             };
 
@@ -47,6 +47,7 @@ impl CredentialService {
                 &claims,
                 &EncodingKey::from_secret("secret".as_ref()),
             )
+            .map(|jwt| (user_id, jwt))
             .map_err(|_err| CredentialServiceError::ErrorOnGeneratingJWT)
         })
     }

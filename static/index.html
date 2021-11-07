@@ -25,8 +25,7 @@
 
 <script>
     let sock
-    let user_jwt;
-    let user_id;
+    let user
 
     async function login(username, password) {
       const response = await fetch('/login', {
@@ -37,12 +36,12 @@
         body: JSON.stringify({ username, password })
       })
 
-      if (response.status !== 200) {
+      console.log("status code", response.status)
+
+      if (response.status > 299) {
         throw new Error('Invalid http response')
       }
       const json = await response.json()
-
-      user_id = username
 
       return json
     }
@@ -50,8 +49,8 @@
       const username = document.getElementById('username').value
       const password = document.getElementById('password').value
       login(username, password)
-        .then(({ jwt }) => { user_jwt = jwt }, () => { user_jwt = undefined })
-        .then(() => connectWebsock(user_jwt))
+        .then(({ jwt, user_id }) => { user = { jwt, id: user_id } }, () => { user = null })
+        .then(() => connectWebsock(user.jwt))
     }
 
     async function createChat(jwt, name) {
@@ -64,7 +63,7 @@
         body: JSON.stringify({ name })
       })
 
-      if (response.status !== 200) {
+      if (response.status > 299) {
         throw new Error('Invalid http response')
       }
       const json = await response.json()
@@ -73,8 +72,8 @@
     }
     document.getElementById('create-chat').onclick = function () {
       const name = document.getElementById('chat-name').value
-      createChat(user_jwt, name)
-        .then(() => loadChats(user_jwt))
+      createChat(user.jwt, name)
+        .then(() => loadChats(user.jwt))
         .then(chats => displayChats(chats))
     }
 
@@ -86,7 +85,7 @@
           'Authorization': 'Bearer ' + jwt
         }
       })
-      if (response.status !== 200) {
+      if (response.status > 299) {
         throw new Error('Invalid http response')
       }
       const json = await response.json()
@@ -98,40 +97,51 @@
       ul.innerHTML = chats.map(c => `<li>${JSON.stringify(c)}<button data-chat-id="${c.id}">Join</button></li>`)
     }
     document.getElementById('load-chats').onclick = function () {
-      loadChats(user_jwt)
+      loadChats(user.jwt)
         .then(chats => displayChats(chats))
     }
 
     let chat_id
+    
+    async function joinToChat(jwt, user_id, chat_id) {
+      const response = await fetch(`/user/${user_id}/joined-chat/${chat_id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + jwt
+        }
+      })
+      if (response.status > 299) {
+        throw new Error('Invalid http response')
+      }
+    }
     document.getElementById('chats').onclick = function (e) {
       let li = e.target;
       let chatId = li.getAttribute('data-chat-id')
       chat_id = chatId
 
-      let body = { type: 'JoinChat', chat_id: chatId, user_id }
-
-      send(JSON.stringify(body))
+      joinToChat(user.jwt, user.id, chatId)
+        .then(() => loadChats(user.jwt).then(chats => displayChats(chats)))
     }
 
     document.getElementById('send-message').onclick = function () {
       const text = document.getElementById('message-text').value
 
-      let body = { type: 'Publish', chat_id, writer_id: user_id, text }
+      let body = { type: 'SendMessageInChat', chat_id, text }
 
       send(JSON.stringify(body))
     }
 
     function connectWebsock(jwt) {
-        sock = new WebSocket("ws://" + window.location.host + '/ws?jwt=' + user_jwt);
-        sock.onopen = recv.bind(window, "Connected");
-        sock.onclose = recv.bind(window, "Disconnected");
+        sock = new WebSocket("ws://" + window.location.host + '/ws?jwt=' + user.jwt);
         sock.onmessage = function(msg) { recv(msg.data) };
         sock.onerror = function(err) { recv("Error: " + err); };
     }
     function recv(msg) {
+      console.log('recv', msg)
       const o = JSON.parse(msg)
       var e = document.createElement("PRE");
-      e.innerText = `${o.chat_id} ${o.writer_id}: ${o.text}`;
+      e.innerText = `${o.chat_id} ${o.writer}: ${o.text}`;
       document.body.appendChild(e);
     }
     function send(msg) {

@@ -3,12 +3,16 @@ use std::{
     sync::Arc,
 };
 
-use futures::{channel::mpsc::UnboundedSender, SinkExt};
+use futures::{
+    channel::mpsc::{UnboundedReceiver, UnboundedSender},
+    lock::Mutex,
+    SinkExt, StreamExt,
+};
 use hyperid::HyperId;
 
 use crate::ws_pool::{
-    AddDevice, AddToChat, ChatId, DeviceId, Item, PublishedMessage, RemoveFromChat,
-    SendMessageInChat, SocketEvent, UserId, WsContext,
+    AddToChat, ChatId, DeviceId, Item, PublishedMessage, RemoveFromChat, SendMessageInChat, UserId,
+    WsContext,
 };
 
 #[derive(Debug)]
@@ -50,54 +54,48 @@ impl ChatService {
         chat
     }
 
-    pub async fn add_device(&mut self, context: Arc<WsContext>, add_device: AddDevice) {
+    pub async fn join_chat(
+        &mut self,
+        user_id: UserId,
+        add_to_chat: AddToChat,
+    ) -> Result<(), ChatServiceError> {
+        info!("user {:?} join chat {:?}", user_id, add_to_chat);
+
+        let chat = match self.chats.get_mut(&add_to_chat.chat_id) {
+            Some(chat) => chat,
+            None => return Err(ChatServiceError::ChatNotFound),
+        };
+        chat.user_ids.insert(user_id);
+
+        Ok(())
+    }
+
+    pub async fn disjoin_chat(
+        &mut self,
+        user_id: UserId,
+        remove_from_chat: RemoveFromChat,
+    ) -> Result<(), ChatServiceError> {
+        info!("disjoin chat {:?}, {:?}", user_id, remove_from_chat);
+
+        let chat = match self.chats.get_mut(&remove_from_chat.chat_id) {
+            Some(chat) => chat,
+            None => return Err(ChatServiceError::ChatNotFound),
+        };
+        chat.user_ids.remove(&user_id);
+
+        Ok(())
+    }
+
+    pub async fn add_device(&mut self, context: Arc<WsContext>) {
         info!("add device {:?}", context);
 
         self.user_devices
             .entry(context.user_id.clone())
             .or_insert_with(Default::default)
             .insert(context.device_id.clone());
-
-        let event = Item::SocketEvent(SocketEvent::AddDevice(context.clone(), add_device));
-        self.item_sender
-            .send(event)
-            .await
-            .expect("Unable to add a new device");
     }
 
-    pub fn join_chat(
-        &mut self,
-        context: Arc<WsContext>,
-        add_to_chat: AddToChat,
-    ) -> Result<(), ChatServiceError> {
-        info!("join chat {:?}, {:?}", context, add_to_chat);
-
-        let chat = match self.chats.get_mut(&add_to_chat.chat_id) {
-            Some(chat) => chat,
-            None => return Err(ChatServiceError::ChatNotFound),
-        };
-        chat.user_ids.insert(context.user_id.clone());
-
-        Ok(())
-    }
-
-    pub fn disjoin_chat(
-        &mut self,
-        context: Arc<WsContext>,
-        remove_from_chat: RemoveFromChat,
-    ) -> Result<(), ChatServiceError> {
-        info!("disjoin chat {:?}, {:?}", context, remove_from_chat);
-
-        let chat = match self.chats.get_mut(&remove_from_chat.chat_id) {
-            Some(chat) => chat,
-            None => return Err(ChatServiceError::ChatNotFound),
-        };
-        chat.user_ids.remove(&context.user_id);
-
-        Ok(())
-    }
-
-    pub fn remove_device(&mut self, context: Arc<WsContext>) -> Result<(), ChatServiceError> {
+    pub async fn remove_device(&mut self, context: Arc<WsContext>) -> Result<(), ChatServiceError> {
         info!("remove device {:?}", context);
 
         self.user_devices
@@ -139,12 +137,18 @@ impl ChatService {
             text: smic.text,
         };
 
-        let event = Item::SocketEvent(SocketEvent::PublishMessage(devices, msg));
+        info!(
+            "UserId {:?} Sending message to devices {:?}",
+            context.user_id.clone(),
+            devices
+        );
 
+        // says to WsPool to send message "msg" to "devices"
+        let event = Item::PublishMessage(devices, msg);
         self.item_sender
             .send(event)
             .await
-            .expect("Unable to add a new device");
+            .expect("Unable to send message to devices");
 
         Ok(())
     }
@@ -166,3 +170,33 @@ pub struct Chat {
 
 #[derive(Serialize)]
 pub struct Chats(pub Vec<Chat>);
+
+pub async fn process_chat(
+    chat_service: Arc<Mutex<ChatService>>,
+    mut internal_receiver: UnboundedReceiver<(Arc<WsContext>, SendMessageInChat)>,
+) {
+    loop {
+        let business_event = internal_receiver.next().await;
+
+        info!("process business event {:?}", business_event);
+
+        let res = match business_event {
+            None => {
+                warn!("NONE!");
+                panic!("ouch");
+                None
+            }
+            Some((context, smic)) => {
+                let mut chat_service = chat_service.lock().await;
+                Some(chat_service.send_message(context, smic).await)
+            }
+        };
+
+        if let Some(Err(e)) = res {
+            // Maybe here we need to send a error message to client...
+            warn!("process business event error {:?}", e);
+        }
+    }
+
+    info!("end process_chat");
+}

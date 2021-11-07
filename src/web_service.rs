@@ -1,14 +1,14 @@
 use std::{convert::Infallible, sync::Arc};
 
-use futures::{lock::Mutex, SinkExt, StreamExt};
+use futures::{channel::mpsc::UnboundedSender, lock::Mutex, SinkExt, StreamExt};
 use hyperid::HyperId;
 
 use crate::{
     chat_service::ChatService,
     credential_service::{CredentialService, CredentialServiceError},
     ws_pool::{
-        AddDevice, BusinessEvent, DeviceId, Item, MessageSender, PublishedMessage, SocketEvent,
-        UserId, WsContext,
+        handle_event, AddDevice, ChatId, DeviceId, Item, MessageSender, PublishedMessage, UserId,
+        WsContext,
     },
 };
 use async_trait::async_trait;
@@ -17,13 +17,15 @@ use warp::{
     http::HeaderValue,
     reject,
     ws::{Message, WebSocket},
-    Error, Filter, Rejection, Reply,
+    Filter, Rejection, Reply,
 };
 
 pub fn get_router(
     chat_service: Arc<Mutex<ChatService>>,
+    item_sender: UnboundedSender<Item>,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     let chat_service = warp::any().map(move || chat_service.clone());
+    let item_sender = warp::any().map(move || item_sender.clone());
     let device_generator = Arc::new(Mutex::new(HyperId::new()));
     let device_generator = warp::any().map(move || device_generator.clone());
     let credential_service = Arc::new(Mutex::new(CredentialService::new()));
@@ -35,6 +37,7 @@ pub fn get_router(
         // The `ws()` filter will prepare Websocket handshake...
         .and(warp::ws())
         .and(chat_service.clone())
+        .and(item_sender)
         .and(credential_service_filter.clone())
         .and(device_generator)
         .and(warp::query::<WsQueryParameter>())
@@ -55,13 +58,27 @@ pub fn get_router(
     let create_chat = warp::path("chat")
         .and(warp::post())
         .and(warp::body::json())
+        .and(resolve_jwt.clone())
+        .and(chat_service.clone())
+        .and_then(handlers::create_chat);
+
+    let join_chat = warp::path!("user" / UserId / "joined-chat" / ChatId)
+        .and(warp::post())
+        .and(resolve_jwt.clone())
+        .and(chat_service.clone())
+        .and_then(handlers::join_chat);
+
+    let disjoin_chat = warp::path!("user" / UserId / "joined-chat" / ChatId)
+        .and(warp::delete())
         .and(resolve_jwt)
         .and(chat_service)
-        .and_then(handlers::create_chat);
+        .and_then(handlers::disjoin_chat);
 
     login
         .or(get_chats)
         .or(create_chat)
+        .or(join_chat)
+        .or(disjoin_chat)
         .or(chat)
         .or(warp::fs::dir("static"))
 }
@@ -105,7 +122,7 @@ pub mod handlers {
     use crate::{
         chat_service::{Chat, ChatService, Chats},
         credential_service::{CredentialService, CredentialServiceError},
-        ws_pool::UserId,
+        ws_pool::{AddToChat, ChatId, RemoveFromChat, UserId},
     };
 
     pub async fn login(
@@ -115,7 +132,7 @@ pub mod handlers {
         let credential_service = credential_service.lock().await;
         let ret = credential_service
             .login(request_body.username, request_body.password)
-            .map(|jwt| LoginResponse { jwt })
+            .map(|(user_id, jwt)| LoginResponse { user_id, jwt })
             .map(warp::Reply::into_response)
             .unwrap_or_else(warp::Reply::into_response);
 
@@ -147,6 +164,38 @@ pub mod handlers {
         Ok(chats.into_response())
     }
 
+    pub async fn join_chat(
+        user_id: UserId,
+        chat_id: ChatId,
+        _auth_user_id: UserId,
+        chat_service: Arc<Mutex<ChatService>>,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let mut chat_service = chat_service.lock().await;
+        let add_to_chat = AddToChat { chat_id };
+        chat_service.join_chat(user_id, add_to_chat).await;
+
+        Ok(warp::http::Response::builder()
+            .status(204)
+            .body("")
+            .unwrap())
+    }
+
+    pub async fn disjoin_chat(
+        user_id: UserId,
+        chat_id: ChatId,
+        _auth_user_id: UserId,
+        chat_service: Arc<Mutex<ChatService>>,
+    ) -> Result<impl warp::Reply, Infallible> {
+        let mut chat_service = chat_service.lock().await;
+        let remove_from_chat = RemoveFromChat { chat_id };
+        chat_service.disjoin_chat(user_id, remove_from_chat).await;
+
+        Ok(warp::http::Response::builder()
+            .status(204)
+            .body("")
+            .unwrap())
+    }
+
     use serde::{Deserialize, Serialize};
 
     #[cfg_attr(test, derive(Serialize))]
@@ -159,6 +208,7 @@ pub mod handlers {
     #[cfg_attr(test, derive(Deserialize))]
     #[derive(Serialize)]
     pub struct LoginResponse {
+        pub user_id: UserId,
         pub jwt: String,
     }
 
@@ -217,10 +267,12 @@ struct WsQueryParameter {
 async fn ws(
     ws: warp::ws::Ws,
     chat_service: Arc<Mutex<ChatService>>,
+    item_sender: UnboundedSender<Item>,
     credential_service: Arc<Mutex<CredentialService>>,
     device_generator: Arc<Mutex<HyperId>>,
     params: WsQueryParameter,
 ) -> Result<impl warp::Reply, Infallible> {
+    info!("ws");
     let user_id = match {
         let credential_service = credential_service.lock().await;
         credential_service.try_decode(&params.jwt)
@@ -228,76 +280,55 @@ async fn ws(
         Err(e) => return Ok(e.into_response()),
         Ok(user_id) => user_id,
     };
+    info!("ws {:?}", user_id);
 
     let device_id = {
         let mut device_generator = device_generator.lock().await;
         device_generator.generate().to_url_safe()
     };
     let device_id: DeviceId = device_id.into();
+    info!("ws {:?} {:?}", user_id, device_id);
 
     Ok(ws
-        .on_upgrade(move |socket| user_connected(socket, chat_service, user_id, device_id))
+        .on_upgrade(move |socket| {
+            user_connected(socket, chat_service, item_sender, user_id, device_id)
+        })
         .into_response())
 }
 
 async fn user_connected(
     ws: WebSocket,
     chat_service: Arc<Mutex<ChatService>>,
+    mut item_sender: UnboundedSender<Item>,
     user_id: UserId,
     device_id: DeviceId,
 ) {
     let (write, read) = ws.split();
 
-    let ws_context = Arc::new(WsContext::new(user_id, device_id));
+    let ws_context = Arc::new(WsContext::new(user_id, device_id.clone()));
 
     let socket_context = ws_context.clone();
+    let socket_chat_service = chat_service.clone();
     let read = read.filter_map(move |message| {
         let socket_context = socket_context.clone();
-        handle_event(socket_context, message)
+        let socket_chat_service = socket_chat_service.clone();
+
+        handle_event(socket_context, socket_chat_service, message)
     });
 
+    info!("user_connected {:?}", ws_context);
     let mut chat_service = chat_service.lock().await;
-    chat_service
-        .add_device(
-            ws_context.clone(),
-            AddDevice {
-                sender: Box::new(write),
-                receiver: Box::pin(read),
-            },
-        )
-        .await;
-}
+    chat_service.add_device(ws_context.clone()).await;
 
-async fn handle_event(
-    socket_context: Arc<WsContext>,
-    message: Result<Message, Error>,
-) -> Option<Item> {
-    match message {
-        Ok(message) => {
-            match (message.is_text(), message.is_close()) {
-                // Text
-                (true, _) => {
-                    let str = message.to_str().expect("Expect text message");
-                    let business_event: BusinessEvent = match serde_json::from_str(str) {
-                        Ok(be) => be,
-                        // Ignore all invalid json
-                        Err(_) => return None,
-                    };
+    let event = Item::AddDevice(
+        ws_context.clone(),
+        AddDevice {
+            sender: Box::new(write),
+            receiver: Box::pin(read),
+        },
+    );
 
-                    Some(Item::BusinessEvent(socket_context, business_event))
-                }
-                // Close
-                (_, true) => Some(Item::SocketEvent(SocketEvent::RemoveDevice(socket_context))),
-                // Ignore others event...
-                _ => None,
-            }
-        }
-        Err(err) => {
-            warn!(
-                "Error on handling event from client: {:?} {}",
-                socket_context, err
-            );
-            Some(Item::SocketEvent(SocketEvent::RemoveDevice(socket_context)))
-        }
-    }
+    info!("item_sender sending...");
+    item_sender.send(event).await.unwrap();
+    info!("item_sender sent");
 }

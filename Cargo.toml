@@ -37,7 +37,7 @@ futures = "0.3.17"
 async-trait = "0.1"
 hyperid = { version = "2", features = ["url_safe"] }
 
-redis = { version = "0.21", features = ["tokio-comp"] }
+redis = { version = "0.21", features = ["aio", "tokio-comp"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = "0.23"
