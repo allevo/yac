@@ -1,4 +1,4 @@
-use std::{convert::Infallible, sync::Arc};
+use std::sync::Arc;
 
 use futures::{channel::mpsc::UnboundedSender, lock::Mutex, SinkExt, StreamExt};
 use hyperid::HyperId;
@@ -81,6 +81,7 @@ pub fn get_router(
         .or(disjoin_chat)
         .or(chat)
         .or(warp::fs::dir("static"))
+        .recover(handlers::handle_rejection)
 }
 
 fn resolve_jwt(
@@ -111,41 +112,71 @@ fn resolve_jwt(
         })
 }
 
-impl warp::reject::Reject for CredentialServiceError {}
-
 pub mod handlers {
-    use std::{convert::Infallible, sync::Arc};
+    use std::sync::Arc;
 
     use futures::lock::Mutex;
-    use warp::Reply;
+    use warp::{http::StatusCode, Rejection, Reply};
 
     use crate::{
-        chat_service::{Chat, ChatService, Chats},
+        chat_service::{Chat, ChatService, ChatServiceError, Chats},
         credential_service::{CredentialService, CredentialServiceError},
         ws_pool::{AddToChat, ChatId, RemoveFromChat, UserId},
     };
 
+    #[derive(Serialize)]
+    struct ErrorMessage {
+        code: u16,
+        message: String,
+    }
+    pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
+        let code;
+        let message;
+
+        if err.is_not_found() {
+            code = StatusCode::NOT_FOUND;
+            message = "NOT_FOUND".to_owned();
+        } else if let Some(err) = err.find::<CredentialServiceError>() {
+            code = StatusCode::BAD_REQUEST;
+            message = format!("{:?}", err);
+        } else if let Some(err) = err.find::<ChatServiceError>() {
+            code = StatusCode::BAD_REQUEST;
+            message = format!("{:?}", err);
+        } else {
+            // We should have expected this... Just log and say its a 500
+            eprintln!("unhandled rejection: {:?}", err);
+            code = StatusCode::INTERNAL_SERVER_ERROR;
+            message = "UNHANDLED_REJECTION".to_owned();
+        }
+
+        let json = warp::reply::json(&ErrorMessage {
+            code: code.as_u16(),
+            message,
+        });
+
+        Ok(warp::reply::with_status(json, code))
+    }
+
     pub async fn login(
         request_body: LoginRequest,
         credential_service: Arc<Mutex<CredentialService>>,
-    ) -> Result<impl warp::Reply, Infallible> {
+    ) -> Result<impl warp::Reply, Rejection> {
         let credential_service = credential_service.lock().await;
-        let ret = credential_service
-            .login(request_body.username, request_body.password)
-            .map(|(user_id, jwt)| LoginResponse { user_id, jwt })
-            .map(warp::Reply::into_response)
-            .unwrap_or_else(warp::Reply::into_response);
+        let (user_id, jwt) =
+            credential_service.login(request_body.username, request_body.password)?;
 
-        Ok(ret)
+        Ok(LoginResponse { user_id, jwt })
     }
+
+    impl warp::reject::Reject for CredentialServiceError {}
 
     pub async fn get_chats(
         _: UserId,
         chat_service: Arc<Mutex<ChatService>>,
-    ) -> Result<impl warp::Reply, Infallible> {
+    ) -> Result<impl warp::Reply, Rejection> {
         let chats = {
             let chat_service = chat_service.lock().await;
-            chat_service.list_chats().await
+            chat_service.list_chats().await?
         };
 
         Ok(chats.into_response())
@@ -155,10 +186,10 @@ pub mod handlers {
         request_body: CreateChatRequest,
         user_id: UserId,
         chat_service: Arc<Mutex<ChatService>>,
-    ) -> Result<impl warp::Reply, Infallible> {
+    ) -> Result<impl warp::Reply, Rejection> {
         let chats = {
             let mut chat_service = chat_service.lock().await;
-            chat_service.create_chat(user_id, request_body.name).await
+            chat_service.create_chat(user_id, request_body.name).await?
         };
 
         Ok(chats.into_response())
@@ -169,31 +200,27 @@ pub mod handlers {
         chat_id: ChatId,
         _auth_user_id: UserId,
         chat_service: Arc<Mutex<ChatService>>,
-    ) -> Result<impl warp::Reply, Infallible> {
+    ) -> Result<impl warp::Reply, Rejection> {
         let mut chat_service = chat_service.lock().await;
         let add_to_chat = AddToChat { chat_id };
-        chat_service.join_chat(user_id, add_to_chat).await;
+        chat_service.join_chat(user_id, add_to_chat).await?;
 
-        Ok(warp::http::Response::builder()
-            .status(204)
-            .body("")
-            .unwrap())
+        Ok(warp::reply::with_status("", StatusCode::NO_CONTENT))
     }
+
+    impl warp::reject::Reject for ChatServiceError {}
 
     pub async fn disjoin_chat(
         user_id: UserId,
         chat_id: ChatId,
         _auth_user_id: UserId,
         chat_service: Arc<Mutex<ChatService>>,
-    ) -> Result<impl warp::Reply, Infallible> {
+    ) -> Result<impl warp::Reply, Rejection> {
         let mut chat_service = chat_service.lock().await;
         let remove_from_chat = RemoveFromChat { chat_id };
-        chat_service.disjoin_chat(user_id, remove_from_chat).await;
+        chat_service.disjoin_chat(user_id, remove_from_chat).await?;
 
-        Ok(warp::http::Response::builder()
-            .status(204)
-            .body("")
-            .unwrap())
+        Ok(warp::reply::with_status("", StatusCode::NO_CONTENT))
     }
 
     use serde::{Deserialize, Serialize};
@@ -210,15 +237,6 @@ pub mod handlers {
     pub struct LoginResponse {
         pub user_id: UserId,
         pub jwt: String,
-    }
-
-    impl warp::Reply for CredentialServiceError {
-        fn into_response(self) -> warp::reply::Response {
-            warp::http::Response::builder()
-                .status(400)
-                .body(format!("{}", self).into())
-                .unwrap()
-        }
     }
 
     impl warp::Reply for LoginResponse {
@@ -271,14 +289,11 @@ async fn ws(
     credential_service: Arc<Mutex<CredentialService>>,
     device_generator: Arc<Mutex<HyperId>>,
     params: WsQueryParameter,
-) -> Result<impl warp::Reply, Infallible> {
+) -> Result<impl warp::Reply, Rejection> {
     info!("ws");
-    let user_id = match {
+    let user_id = {
         let credential_service = credential_service.lock().await;
-        credential_service.try_decode(&params.jwt)
-    } {
-        Err(e) => return Ok(e.into_response()),
-        Ok(user_id) => user_id,
+        credential_service.try_decode(&params.jwt)?
     };
     info!("ws {:?}", user_id);
 
@@ -329,6 +344,8 @@ async fn user_connected(
     );
 
     info!("item_sender sending...");
-    item_sender.send(event).await.unwrap();
-    info!("item_sender sent");
+    match item_sender.send(event).await {
+        Err(e) => error!("error on sending event {}", e),
+        Ok(_) => info!("item_sender sent"),
+    };
 }

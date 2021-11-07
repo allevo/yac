@@ -146,9 +146,19 @@ impl WsPool {
         }
     }
 
-    pub async fn add_device(&mut self, _context: Arc<WsContext>, _add_device: AddDevice) {}
+    pub async fn add_device(&mut self, context: Arc<WsContext>, add_device: AddDevice) {
+        info!("add device event {:?}", context);
 
-    pub async fn remove_device(&mut self, _device_id: &DeviceId) {}
+        self.incoming_streams.push(add_device.receiver);
+        self.devices
+            .insert(context.device_id.clone(), add_device.sender);
+    }
+
+    pub async fn remove_device(&mut self, device_id: &DeviceId) {
+        info!("remove device {:?}", device_id);
+
+        self.devices.remove(device_id);
+    }
 }
 
 pub async fn process_ws_pool(
@@ -172,17 +182,10 @@ pub async fn process_ws_pool(
                 info!("SendMessageInChat sent");
             }
             Some(Item::AddDevice(context, add_device)) => {
-                info!("add device event {:?}", context);
-
-                ws_pool.incoming_streams.push(add_device.receiver);
-                ws_pool
-                    .devices
-                    .insert(context.device_id.clone(), add_device.sender);
+                ws_pool.add_device(context, add_device).await;
             }
             Some(Item::RemoveDevice(device_id)) => {
-                info!("remove device {:?}", device_id);
-
-                ws_pool.devices.remove(&device_id);
+                ws_pool.remove_device(&device_id).await;
             }
             Some(Item::PublishMessage(device_ids, msg)) => {
                 info!("publish message {:?}, {:?}", device_ids, msg);

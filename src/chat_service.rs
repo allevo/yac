@@ -38,11 +38,15 @@ impl ChatService {
         }
     }
 
-    pub async fn list_chats(&self) -> Chats {
-        Chats(self.chats.values().cloned().collect())
+    pub async fn list_chats(&self) -> Result<Chats, ChatServiceError> {
+        Ok(Chats(self.chats.values().cloned().collect()))
     }
 
-    pub async fn create_chat(&mut self, creator: UserId, name: String) -> Chat {
+    pub async fn create_chat(
+        &mut self,
+        creator: UserId,
+        name: String,
+    ) -> Result<Chat, ChatServiceError> {
         let chat = Chat {
             id: self.chat_id_generator.generate().to_url_safe().into(),
             creator,
@@ -51,7 +55,7 @@ impl ChatService {
         };
         self.chats.insert(chat.id.clone(), chat.clone());
 
-        chat
+        Ok(chat)
     }
 
     pub async fn join_chat(
@@ -183,7 +187,6 @@ pub async fn process_chat(
         let res = match business_event {
             None => {
                 warn!("NONE!");
-                panic!("ouch");
                 None
             }
             Some((context, smic)) => {
@@ -197,6 +200,4 @@ pub async fn process_chat(
             warn!("process business event error {:?}", e);
         }
     }
-
-    info!("end process_chat");
 }
