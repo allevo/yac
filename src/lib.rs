@@ -7,6 +7,7 @@ use futures::{channel::mpsc::unbounded, future, FutureExt};
 use futures::{SinkExt, StreamExt};
 use redis::RedisError;
 use tokio::runtime::Runtime;
+use tokio::signal;
 use warp::Filter;
 use ws_pool::WsPool;
 
@@ -111,15 +112,26 @@ pub async fn start(config: Config) {
         }
     });
 
-    let server = warp::serve(router).run(([127, 0, 0, 1], http_port));
+    let ctrl_c_signal = async {
+        signal::ctrl_c().await.expect("failed to listen for event");
+        println!("Ctrl+C pressed");
+    };
+
+    let server = warp::serve(router);
 
     let all_futures_to_wait = vec![
         ws_process.boxed(),
         chat_process.boxed(),
-        server.boxed(),
         to_redis_process.boxed(),
+        ctrl_c_signal.boxed(),
     ];
-    let _ = future::select_all(all_futures_to_wait).await;
+    let signal = future::select_all(all_futures_to_wait);
+    let (_, server) = server.bind_with_graceful_shutdown(([127, 0, 0, 1], http_port), async move {
+        info!("awaiting");
+        signal.await;
+        info!("awaited");
+    });
+    server.await;
 
     info!("Ended");
 }

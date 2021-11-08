@@ -56,7 +56,7 @@ impl WsPool {
 
         self.devices.remove(device_id);
 
-        
+        // This can be written better
         let new = SelectAll::new();
         let old_new = std::mem::replace(&mut self.incoming_streams, new);
         for s in old_new {

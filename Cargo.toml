@@ -7,8 +7,8 @@ edition = "2018"
 
 
 [[bin]]
-name = "standalone"
-path = "bin/standalone.rs"
+name = "yac"
+path = "bin/yac.rs"
 
 # [[bin]]
 # name = "clustered"
