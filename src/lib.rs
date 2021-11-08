@@ -7,17 +7,20 @@ use futures::{channel::mpsc::unbounded, future, FutureExt};
 use futures::{SinkExt, StreamExt};
 use tokio::runtime::Runtime;
 use warp::Filter;
-use ws_pool::{WsContext, WsPool};
+use ws_pool::WsPool;
 
 use crate::chat_service::{process_chat, ChatService};
+use crate::models::*;
 use crate::web_service::get_router;
-use crate::ws_pool::{process_ws_pool, Item, SendMessageInChat};
+use crate::ws_pool::process_ws_pool;
 
 #[macro_use]
 extern crate log;
 
 mod chat_service;
 mod credential_service;
+mod models;
+mod my_select_all;
 mod web_service;
 mod ws_pool;
 
@@ -145,8 +148,8 @@ mod tests {
 
     use crate::{
         chat_service::Chat,
+        models::{PublishedMessage, SendMessageInChat},
         web_service::http_handlers::{CreateChatRequest, LoginRequest, LoginResponse},
-        ws_pool::{PublishedMessage, SendMessageInChat},
     };
 
     use super::*;

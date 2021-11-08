@@ -6,8 +6,8 @@ use hyperid::HyperId;
 use crate::{
     chat_service::ChatService,
     credential_service::CredentialService,
+    models::{ChatId, Item, UserId},
     web_service::resolve_jwt::resolve_jwt,
-    ws_pool::{ChatId, Item, UserId},
 };
 
 use warp::{self, Filter};

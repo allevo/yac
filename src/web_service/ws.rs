@@ -6,9 +6,11 @@ use hyperid::HyperId;
 use crate::{
     chat_service::ChatService,
     credential_service::CredentialService,
-    ws_pool::{
-        handle_event, AddDevice, DeviceId, Item, MessageSender, PublishedMessage, UserId, WsContext,
+    models::{
+        AddDevice, DeviceId, Item, MessageSender, PublishedMessage, ReceiverStream, UserId,
+        WsContext,
     },
+    ws_pool::handle_event,
 };
 use async_trait::async_trait;
 use warp::{
@@ -92,7 +94,7 @@ async fn user_connected(
         ws_context.clone(),
         AddDevice {
             sender: Box::new(write),
-            receiver: Box::pin(read),
+            receiver: ReceiverStream::new(ws_context.device_id.clone(), Box::pin(read)),
         },
     );
 

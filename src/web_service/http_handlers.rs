@@ -6,7 +6,7 @@ use warp::{http::StatusCode, Rejection, Reply};
 use crate::{
     chat_service::{Chat, ChatService, ChatServiceError, Chats},
     credential_service::{CredentialService, CredentialServiceError},
-    ws_pool::{AddToChat, ChatId, RemoveFromChat, UserId},
+    models::{AddToChat, ChatId, RemoveFromChat, UserId},
 };
 
 #[derive(Serialize)]

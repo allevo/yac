@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use futures::{lock::Mutex};
+use futures::lock::Mutex;
 
 use crate::{
     credential_service::{CredentialService, CredentialServiceError},
-    ws_pool::UserId,
+    models::UserId,
 };
 
 use warp::{self, http::HeaderValue, reject, Filter, Rejection};

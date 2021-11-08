@@ -1,7 +1,5 @@
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 
-use crate::ws_pool::UserId;
-
 const JWT_ALGO: Algorithm = Algorithm::HS256;
 
 #[derive(Debug)]
@@ -100,6 +98,8 @@ struct CredentialRow {
 }
 
 use serde::{Deserialize, Serialize};
+
+use crate::models::UserId;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {

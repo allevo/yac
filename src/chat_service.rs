@@ -10,10 +10,7 @@ use futures::{
 };
 use hyperid::HyperId;
 
-use crate::ws_pool::{
-    AddToChat, ChatId, DeviceId, Item, PublishedMessage, RemoveFromChat, SendMessageInChat, UserId,
-    WsContext,
-};
+use crate::models::*;
 
 #[derive(Debug)]
 pub enum ChatServiceError {
