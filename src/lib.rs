@@ -5,6 +5,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::lock::Mutex;
 use futures::{channel::mpsc::unbounded, future, FutureExt};
 use futures::{SinkExt, StreamExt};
+use redis::RedisError;
 use tokio::runtime::Runtime;
 use warp::Filter;
 use ws_pool::WsPool;
@@ -19,59 +20,61 @@ extern crate log;
 
 mod chat_service;
 mod credential_service;
-mod models;
+pub mod models;
 mod web_service;
 mod ws_pool;
 
-fn from_redis(mut from_redis_sender: UnboundedSender<(Arc<WsContext>, SendMessageInChat)>) {
-    info!("from_redis 1!!");
-    info!("from_redis 2!!");
+fn from_redis(mut from_redis_sender: UnboundedSender<(Arc<WsContext>, SendMessageInChat)>, config: Config) -> Result<(), RedisError> {
+    info!("starting subscribing {:?}", config);
 
-    let client = redis::Client::open("redis://127.0.0.1/").unwrap();
-    let mut con = client.get_connection().unwrap();
+    let client = redis::Client::open(config.redis_url)?;
+    let mut con = client.get_connection()?;
     let mut pubsub = con.as_pubsub();
-    pubsub.subscribe("chats").unwrap();
+    pubsub.subscribe(config.redis_channel)?;
 
-    let runtime = Runtime::new().unwrap();
-    info!("starting subscribing");
+    let runtime = Runtime::new()?;
     loop {
-        let msg = pubsub.get_message().unwrap();
-        let payload: String = msg.get_payload().unwrap();
+        let msg = pubsub.get_message()?;
+        let payload: String = msg.get_payload()?;
         info!("channel '{}': {}", msg.get_channel_name(), payload);
 
         let (ws_context, smic): (WsContext, SendMessageInChat) =
             serde_json::from_str(&payload).unwrap();
         let ws_context = Arc::new(ws_context);
 
-        runtime
-            .block_on(from_redis_sender.send((ws_context, smic)))
-            .unwrap();
+        let r = runtime
+            .block_on(from_redis_sender.send((ws_context, smic)));
+        
+        if let Err(e) = r {
+            error!("Error on sending from_redis_sender {:?}", e);
+        }
     }
 }
 
-async fn to_redis(mut to_redis_receiver: UnboundedReceiver<(Arc<WsContext>, SendMessageInChat)>) {
-    let client = redis::Client::open("redis://127.0.0.1/").unwrap();
+async fn to_redis(mut to_redis_receiver: UnboundedReceiver<(Arc<WsContext>, SendMessageInChat)>, config: Config) {
+    info!("starting to_redis {:?}", config);
+
+    let client = redis::Client::open(config.redis_url).unwrap();
     let mut con = client.get_connection().unwrap();
 
-    info!("starting to_redis");
     loop {
         let m = to_redis_receiver.next();
 
         match m.await {
             None => {
-                info!("to_redis: none");
+                warn!("to_redis: none");
+                // The senders are closed. So there're no other events here
+                break;
             }
             Some((ws_context, smic)) => {
                 info!("to_redis: {:?}, {:?}", ws_context, smic);
 
                 match serde_json::to_string(&(ws_context, smic)) {
-                    Err(e) => {
-                        error!("to_redis: {}", e);
-                    }
+                    Err(e) => error!("to_redis: {}", e),
                     Ok(s) => {
                         info!("sending to_redis: {}", s);
                         match redis::cmd("PUBLISH")
-                            .arg("chats")
+                            .arg(config.redis_channel.clone())
                             .arg(s)
                             .query::<i32>(&mut con)
                         {
@@ -89,7 +92,7 @@ async fn to_redis(mut to_redis_receiver: UnboundedReceiver<(Arc<WsContext>, Send
     }
 }
 
-pub async fn start() {
+pub async fn start(config: Config) {
     let (router, ws_pool, chat_service) = init();
 
     let (to_redis_sender, to_redis_receiver) = unbounded::<(Arc<WsContext>, SendMessageInChat)>();
@@ -99,13 +102,16 @@ pub async fn start() {
     let ws_process = process_ws_pool(ws_pool, to_redis_sender);
     let chat_process = process_chat(chat_service.clone(), from_redis_receiver);
 
-    thread::spawn(|| {
-        info!("from_redis thread spawn");
-        from_redis(from_redis_sender);
-    });
-    let to_redis_process = to_redis(to_redis_receiver);
+    let http_port = config.port;
 
-    let server = warp::serve(router).run(([127, 0, 0, 1], 3030));
+    let to_redis_process = to_redis(to_redis_receiver, config.clone());
+    thread::spawn(|| {
+        if let Err(e) = from_redis(from_redis_sender, config) {
+            error!("from_redis error: {:?}", e);
+        }
+    });
+
+    let server = warp::serve(router).run(([127, 0, 0, 1], http_port));
 
     let all_futures_to_wait = vec![
         ws_process.boxed(),
@@ -157,6 +163,7 @@ mod tests {
     #[tokio::test]
     async fn test_flow() {
         pretty_env_logger::try_init().ok();
+        let config: Config = Default::default();
 
         let (to_redis_sender, to_redis_receiver) =
             unbounded::<(Arc<WsContext>, SendMessageInChat)>();
@@ -167,15 +174,16 @@ mod tests {
 
         let ws_process = process_ws_pool(ws_pool, to_redis_sender);
         let chat_process = process_chat(chat_service.clone(), from_redis_receiver);
-        let to_redis_process = to_redis(to_redis_receiver);
+        let to_redis_process = to_redis(to_redis_receiver, config.clone());
 
         tokio::spawn(ws_process);
         tokio::spawn(chat_process);
         tokio::spawn(to_redis_process);
 
-        thread::spawn(|| {
+        thread::spawn(move || {
             info!("from_redis thread spawn");
-            from_redis(from_redis_sender);
+            let r = from_redis(from_redis_sender, config);
+            info!("ended {:?}", r);
         });
 
         let (user_id, jwt) = perform_login!(router, "pippo", "pippo");

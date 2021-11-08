@@ -1,8 +1,14 @@
-use websocket::start;
+use yac::{models::Config, start};
+
 
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
 
-    start().await;
+    let config = match envy::from_env::<Config>() {
+        Ok(config) => config,
+        Err(error) => panic!("{:#?}", error)
+    };
+
+    start(config).await;
 }

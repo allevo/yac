@@ -7,10 +7,7 @@ use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedReceiver, UnboundedSe
 
 use warp::{ws::Message, Error};
 
-use crate::{chat_service::ChatService, models::{
-        AddDevice, DeviceId, Item, PublishedMessage, ReceiverStream, SendMessageInChat,
-        SenderStream, WsContext,
-    }};
+use crate::{chat_service::ChatService, models::{AddDevice, DeviceId, Item, PublishedMessage, ReceiverStream, SendMessageInChat, SenderStream, WsContext}};
 
 trait GetId {
     fn get_id(&self) -> &DeviceId;
@@ -81,7 +78,11 @@ pub async fn process_ws_pool(
         let m = ws_pool.incoming_streams.next();
 
         match m.await {
-            None => warn!("Pulled None from stream"),
+            None => {
+                warn!("Pulled None from stream");
+                // There's no receiver anymore
+                break
+            },
             Some(Item::SendMessageInChat(context, event)) => {
                 info!("SendMessageInChat {:?} {:?}", context, event);
 
@@ -105,7 +106,7 @@ pub async fn process_ws_pool(
         }
     }
 
-    // info!("end ws_pool.process");
+    info!("end ws_pool.process");
 }
 
 pub async fn handle_event(

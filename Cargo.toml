@@ -14,9 +14,9 @@ path = "bin/standalone.rs"
 # name = "clustered"
 # path = "bin/clustered.rs"
 
-[lib]
-name = "websocket"
-path = "src/lib.rs"
+# [lib]
+# name = "websocket"
+# path = "src/lib.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -38,7 +38,7 @@ async-trait = "0.1"
 hyperid = { version = "2", features = ["url_safe"] }
 
 redis = { version = "0.21", features = ["aio", "tokio-comp"] }
-pin-project-lite = "0.2"
+envy = "0.4"
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = "0.23"

@@ -20,6 +20,7 @@
 
 <hr />
 
+<select id="choose-chats"></select>
 <input id="message-text" name="message-text">
 <button id="send-message">Send</button>
 
@@ -27,110 +28,82 @@
     let sock
     let user
 
-    async function login(username, password) {
-      const response = await fetch('/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password })
-      })
-
-      console.log("status code", response.status)
-
-      if (response.status > 299) {
-        throw new Error('Invalid http response')
-      }
-      const json = await response.json()
-
-      return json
+    const apis = {
+      async login(username, password) {
+        return makeRequest('POST', '/login', { username, password }, null, 200)
+      },
+      async createChat(jwt, name) {
+        return makeRequest('POST', '/chat', { name }, jwt, 200)
+      },
+      async loadChats(jwt) {
+        return makeRequest('GET', '/chat', null, jwt, 200)
+      },
+      async joinToChat(jwt, user_id, chat_id) {
+        return makeRequest('POST', `/user/${user_id}/joined-chat/${chat_id}`, null, jwt, 204)
+      },
+      async disjoinFromChat(jwt, user_id, chat_id) {
+        return makeRequest('DELETE', `/user/${user_id}/joined-chat/${chat_id}`, null, jwt, 204)
+      },
     }
-    document.getElementById('login').onclick = function () {
-      const username = document.getElementById('username').value
-      const password = document.getElementById('password').value
-      login(username, password)
-        .then(({ jwt, user_id }) => { user = { jwt, id: user_id } }, () => { user = null })
-        .then(() => connectWebsock(user.jwt))
-    }
+    const eventHandlers = {
+      onLoginButtonClicked: () => {
+        const username = document.getElementById('username').value
+        const password = document.getElementById('password').value
+        apis.login(username, password)
+          .then(({ jwt, user_id }) => { user = { jwt, id: user_id } }, () => { user = null })
+          .then(() => connectWebsock(user.jwt))
+      },
+      onCreateChatButtonClicked: () => {
+        const name = document.getElementById('chat-name').value
+        apis.createChat(user.jwt, name)
+          .then(() => apis.loadChats(user.jwt))
+          .then(chats => ui.updateChats(chats))
+      },
+      onLoadChatsButtonClicked: () => {
+        apis.loadChats(user.jwt)
+          .then(chats => ui.updateChats(chats))
+      },
+      onJoinToChatButtonClicked: e => {
+        let li = e.target;
+        let chatId = li.getAttribute('data-chat-id')
+        let actionType = li.getAttribute('data-action')
 
-    async function createChat(jwt, name) {
-      const response = await fetch('/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + jwt,
-        },
-        body: JSON.stringify({ name })
-      })
-
-      if (response.status > 299) {
-        throw new Error('Invalid http response')
-      }
-      const json = await response.json()
-
-      return json
-    }
-    document.getElementById('create-chat').onclick = function () {
-      const name = document.getElementById('chat-name').value
-      createChat(user.jwt, name)
-        .then(() => loadChats(user.jwt))
-        .then(chats => displayChats(chats))
-    }
-
-    async function loadChats(jwt) {
-      const response = await fetch('/chat', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + jwt
+        if (actionType === "join") {
+          apis.joinToChat(user.jwt, user.id, chatId)
+            .then(() => apis.loadChats(user.jwt).then(chats => ui.updateChats(chats)))
+        } else {
+          apis.disjoinFromChat(user.jwt, user.id, chatId)
+            .then(() => apis.loadChats(user.jwt).then(chats => ui.updateChats(chats)))
         }
-      })
-      if (response.status > 299) {
-        throw new Error('Invalid http response')
-      }
-      const json = await response.json()
+      },
+      onSendMessageButtonClicked: () => {
+        const text = document.getElementById('message-text').value
 
-      return json
-    }
-    function displayChats(chats) {
-      const ul = document.getElementById('chats')
-      ul.innerHTML = chats.map(c => `<li>${JSON.stringify(c)}<button data-chat-id="${c.id}">Join</button></li>`)
-    }
-    document.getElementById('load-chats').onclick = function () {
-      loadChats(user.jwt)
-        .then(chats => displayChats(chats))
-    }
+        const select = document.getElementById('choose-chats')
+        const chat_id = select.value
 
-    let chat_id
-    
-    async function joinToChat(jwt, user_id, chat_id) {
-      const response = await fetch(`/user/${user_id}/joined-chat/${chat_id}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + jwt
-        }
-      })
-      if (response.status > 299) {
-        throw new Error('Invalid http response')
+        let body = { type: 'SendMessageInChat', chat_id, text }
+
+        send(JSON.stringify(body))
       }
     }
-    document.getElementById('chats').onclick = function (e) {
-      let li = e.target;
-      let chatId = li.getAttribute('data-chat-id')
-      chat_id = chatId
+    const ui = {
+      updateChats(chats) {
+        const ul = document.getElementById('chats')
+        ul.innerHTML = chats.map(c => `<li>${JSON.stringify(c)}<button data-action="join" data-chat-id="${c.id}">Join</button><button data-action="disjoin" data-chat-id="${c.id}">Disjoin</button></li>`)
 
-      joinToChat(user.jwt, user.id, chatId)
-        .then(() => loadChats(user.jwt).then(chats => displayChats(chats)))
+        const own_chats = chats.filter(c => c.user_ids.includes(user.id))
+        const select = document.getElementById('choose-chats')
+        select.innerHTML = own_chats.map(c => `<option value="${c.id}">${c.name}</option>`)
+      }
     }
 
-    document.getElementById('send-message').onclick = function () {
-      const text = document.getElementById('message-text').value
+    document.getElementById('login').onclick = eventHandlers.onLoginButtonClicked
+    document.getElementById('create-chat').onclick = eventHandlers.onCreateChatButtonClicked
+    document.getElementById('load-chats').onclick = eventHandlers.onLoadChatsButtonClicked
+    document.getElementById('chats').onclick = eventHandlers.onJoinToChatButtonClicked
+    document.getElementById('send-message').onclick = eventHandlers.onSendMessageButtonClicked
 
-      let body = { type: 'SendMessageInChat', chat_id, text }
-
-      send(JSON.stringify(body))
-    }
 
     function connectWebsock(jwt) {
         sock = new WebSocket("ws://" + window.location.host + '/ws?jwt=' + user.jwt);
@@ -145,7 +118,30 @@
       document.body.appendChild(e);
     }
     function send(msg) {
-        sock.send(msg);
+      sock.send(msg);
+    }
+
+    async function makeRequest(method, path, body, jwt, expectedResponseStatusCode) {
+      console.log(method, path)
+
+      const response = await fetch(path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + jwt,
+        },
+        body: body ? JSON.stringify(body) : undefined
+      })
+
+      console.log("status code", response.status)
+
+      if (response.status !== expectedResponseStatusCode) {
+        throw new Error('Invalid http response')
+      }
+      if (expectedResponseStatusCode === 204) {
+        return
+      }
+      return response.json()
     }
 </script>
 </body>
