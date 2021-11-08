@@ -20,7 +20,6 @@ extern crate log;
 mod chat_service;
 mod credential_service;
 mod models;
-mod my_select_all;
 mod web_service;
 mod ws_pool;
 

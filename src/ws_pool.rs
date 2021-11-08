@@ -3,25 +3,21 @@ use std::{
     sync::Arc,
 };
 
-use futures::{
-    channel::mpsc::{UnboundedReceiver, UnboundedSender},
-    lock::Mutex,
-    SinkExt, StreamExt,
-};
+use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedReceiver, UnboundedSender}, lock::Mutex, stream::{SelectAll, select_all}};
 
 use warp::{ws::Message, Error};
 
-use crate::{
-    chat_service::ChatService,
-    models::{
+use crate::{chat_service::ChatService, models::{
         AddDevice, DeviceId, Item, PublishedMessage, ReceiverStream, SendMessageInChat,
         SenderStream, WsContext,
-    },
-    my_select_all,
-};
+    }};
+
+trait GetId {
+    fn get_id(&self) -> &DeviceId;
+}
 
 pub struct WsPool {
-    incoming_streams: my_select_all::MySelectAll<ReceiverStream>,
+    incoming_streams: SelectAll<ReceiverStream>,
     devices: HashMap<DeviceId, SenderStream>,
 }
 
@@ -30,7 +26,7 @@ impl WsPool {
         let recv: Vec<ReceiverStream> =
             vec![ReceiverStream::new("".into(), Box::pin(item_receiver))];
 
-        let select_all = my_select_all::my_select_all(recv);
+        let select_all = select_all(recv);
 
         Self {
             incoming_streams: select_all,
@@ -62,7 +58,16 @@ impl WsPool {
         info!("remove device {:?}", device_id);
 
         self.devices.remove(device_id);
-        self.incoming_streams.remove_by_device_id(device_id)
+
+        
+        let new = SelectAll::new();
+        let old_new = std::mem::replace(&mut self.incoming_streams, new);
+        for s in old_new {
+            if s.get_id() == device_id {
+                continue
+            }
+            self.incoming_streams.push(s);
+        }
     }
 }
 

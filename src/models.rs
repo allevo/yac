@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use std::{collections::HashSet, fmt::Debug, pin::Pin, str::FromStr, sync::Arc};
 
-use crate::my_select_all::GetId;
 use serde::{Deserialize, Serialize};
 
 #[async_trait]
@@ -33,8 +32,8 @@ impl Stream for ReceiverStream {
         self.1.poll_next_unpin(cx)
     }
 }
-impl GetId for ReceiverStream {
-    fn get_id(&self) -> &DeviceId {
+impl ReceiverStream {
+    pub fn get_id(&self) -> &DeviceId {
         &self.0
     }
 }
