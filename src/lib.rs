@@ -182,7 +182,7 @@ mod tests {
     #[tokio::test]
     async fn test_flow() {
         pretty_env_logger::try_init().ok();
-        let config: Config = Default::default();
+        let config: Config = envy::from_env::<Config>().unwrap();
 
         let (to_redis_sender, to_redis_receiver) =
             unbounded::<(Arc<WsContext>, SendMessageInChat)>();
