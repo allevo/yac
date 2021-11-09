@@ -1,8 +1,9 @@
-# YAC
-Yac is Another Chat
+# YAC [![Rust](https://github.com/allevo/yac/actions/workflows/rust.yml/badge.svg)](https://github.com/allevo/yac/actions/workflows/rust.yml)
 
-This repo contains an example of Chat using WebSocket.
+YAC (Yac is Another Chat) is an example of Chat using WebSocket.
 Because often the example you find in internet are "not so production ready", I would like to try to implement something more robust.
+
+See [slides](https://docs.google.com/presentation/d/1NnmaR96bOYi7JniAwCcJp464A_H8eo5i3bO5VR136g8/edit?usp=sharing) for the introduction.
 
 ## ToC
 
