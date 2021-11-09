@@ -183,6 +183,7 @@ mod tests {
     async fn test_flow() {
         pretty_env_logger::try_init().ok();
         let config: Config = envy::from_env::<Config>().unwrap();
+        info!("Config {:?}", config);
 
         let (to_redis_sender, to_redis_receiver) =
             unbounded::<(Arc<WsContext>, SendMessageInChat)>();
