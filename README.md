@@ -4,20 +4,18 @@ Yac is Another Chat
 This repo contains an example of Chat using WebSocket.
 Because often the example you find in internet are "not so production ready", I would like to try to implement something more robust.
 
-## Development
+## ToC
 
-For running it locally:
-
-```shell
-cargo run
-```
-
-For running test:
-```shell
-cargo test
-```
-
-**NB**: you need always a running redis server on "redis://127.0.0.1/" (port 6379). You can change it, if you want.
+  - [Main struture](#main-struture)
+    - [`ChatService`](#chatservice)
+    - [`WsPool`](#wspool)
+    - [`Handler`](#handler)
+  - [Component interation](#component-interation)
+    - [Channel approach](#channel-approach)
+      - [To `WsPool`](#to-wspool)
+      - [To/From Redis (`Pub/Sub`)](#tofrom-redis-pubsub)
+  - [Production considerations](#production-considerations)
+  - [Development](#development)
 
 ## Main struture
 
@@ -40,11 +38,11 @@ This pool contains all websockets currently connected to the server
 
 HTTP handlers allows to expose business functionality through a JSON REST interface.
 
-### Component interation
+## Component interation
 
-#### Channel approach
+### Channel approach
 
-##### To `WsPool`
+#### To `WsPool`
 
 Near by `WsPool` struct, there's a `process_ws_pool` function that iterate over all WebSocket events. In this way, we don't have a lot of futures polling: just one. `process_ws_pool`, also, is the only one piece of the code that can access to the WsPool instance. That is guarandee by Rust itself: `WsPool` cannot send among threads safetly and there's no `Arc<Mutex<WsPool>>`. So At compile time, we have the guarandee that `process_ws_pool` has an exclusive access to `WsPool`. And that is amazing.
 
@@ -71,5 +69,21 @@ But again, I would not like to link deeper `WsPool` and `ChatService` with redis
 So, for interacting with redis (aka for sending messages to redis and for listening messages from redis), we used the channel capability: when `WsPool` needs to inform that a new message arrives, it that message into the channel and externally sends it to redis channel (see `to_redis` in lib.rs).
 From external process (see `from_redis` in lib.rs), we listen the messages from redis and invoke `ChatService` indirectly using a channel (see `process_chat` in chat_service.rs)
 
-#### Production considerations
+## Production considerations
 The code uses always asychronous code for simulating database interation even where not needed. For production, this could impact the performance so please consider to change it before go live.
+
+
+## Development
+
+For running it locally:
+
+```shell
+cargo run
+```
+
+For running test:
+```shell
+cargo test
+```
+
+**NB**: you need always a running redis server on "redis://127.0.0.1/" (port 6379). You can change it, if you want.
