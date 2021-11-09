@@ -7,7 +7,7 @@ use crate::{
     chat_service::ChatService,
     credential_service::CredentialService,
     models::{ChatId, Item, UserId},
-    web_service::resolve_jwt::resolve_jwt,
+    handlers::resolve_jwt::resolve_jwt,
 };
 
 use warp::{self, Filter};
@@ -30,7 +30,6 @@ pub fn get_router(
     let credential_service_filter = warp::any().map(move || credential_service.clone());
 
     let chat = warp::path("ws")
-        // The `ws()` filter will prepare Websocket handshake...
         .and(warp::ws())
         .and(chat_service.clone())
         .and(item_sender)
@@ -70,6 +69,7 @@ pub fn get_router(
         .and(chat_service)
         .and_then(http_handlers::disjoin_chat);
 
+    // Combine whole apis togheter specifing the orders
     login
         .or(get_chats)
         .or(create_chat)

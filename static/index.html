@@ -68,6 +68,10 @@
         let chatId = li.getAttribute('data-chat-id')
         let actionType = li.getAttribute('data-action')
 
+        if (!actionType) {
+          return;
+        }
+
         if (actionType === "join") {
           apis.joinToChat(user.jwt, user.id, chatId)
             .then(() => apis.loadChats(user.jwt).then(chats => ui.updateChats(chats)))

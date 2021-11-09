@@ -13,7 +13,8 @@ use ws_pool::WsPool;
 
 use crate::chat_service::{process_chat, ChatService};
 use crate::models::*;
-use crate::web_service::get_router;
+use crate::config::Config;
+use crate::handlers::get_router;
 use crate::ws_pool::process_ws_pool;
 
 #[macro_use]
@@ -21,9 +22,10 @@ extern crate log;
 
 mod chat_service;
 mod credential_service;
-pub mod models;
-mod web_service;
+mod models;
+mod handlers;
 mod ws_pool;
+pub mod config;
 
 fn from_redis(mut from_redis_sender: UnboundedSender<(Arc<WsContext>, SendMessageInChat)>, config: Config) -> Result<(), RedisError> {
     info!("starting subscribing {:?}", config);
@@ -141,14 +143,14 @@ fn init() -> (
     WsPool,
     Arc<Mutex<ChatService>>,
 ) {
-    let (ws_item_sender, ws_item_receiver) = unbounded::<Item>();
+    let (to_ws_pool_sender, to_ws_pool_receiver) = unbounded::<Item>();
 
-    let chat_service = ChatService::new(ws_item_sender.clone());
-    let ws_pool = WsPool::new(ws_item_receiver);
+    let chat_service = ChatService::new(to_ws_pool_sender.clone());
+    let ws_pool = WsPool::new(to_ws_pool_receiver);
 
     let chat_service = Arc::new(Mutex::new(chat_service));
 
-    let router = get_router(chat_service.clone(), ws_item_sender);
+    let router = get_router(chat_service.clone(), to_ws_pool_sender);
 
     (router, ws_pool, chat_service)
 }
@@ -166,7 +168,7 @@ mod tests {
     use crate::{
         chat_service::Chat,
         models::{PublishedMessage, SendMessageInChat},
-        web_service::http_handlers::{CreateChatRequest, LoginRequest, LoginResponse},
+        handlers::http_handlers::{CreateChatRequest, LoginRequest, LoginResponse},
     };
 
     use super::*;

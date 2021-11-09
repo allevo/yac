@@ -6,37 +6,12 @@ use serde::{Deserialize, Serialize};
 
 #[async_trait]
 pub trait MessageSender {
-    async fn send_message(&mut self, msg: PublishedMessage);
+    async fn send_message(&mut self, msg: Arc<PublishedMessage>) -> Result<(), ()>;
 }
 
 pub type SenderStream = Box<dyn MessageSender + Send + 'static>;
 
-pub struct ReceiverStream(DeviceId, Pin<Box<dyn Stream<Item = Item> + Send + 'static>>);
-
-impl ReceiverStream {
-    pub fn new(
-        device_id: DeviceId,
-        stream: Pin<Box<dyn Stream<Item = Item> + Send + 'static>>,
-    ) -> Self {
-        Self(device_id, stream)
-    }
-}
-
-impl Stream for ReceiverStream {
-    type Item = Item;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.1.poll_next_unpin(cx)
-    }
-}
-impl ReceiverStream {
-    pub fn get_id(&self) -> &DeviceId {
-        &self.0
-    }
-}
+pub struct ReceiverStream(pub DeviceId, pub Pin<Box<dyn Stream<Item = Item> + Send + 'static>>);
 
 #[derive(Debug)]
 pub enum Item {
@@ -125,32 +100,5 @@ impl FromStr for ChatId {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(s.to_string()))
-    }
-}
-
-
-fn default_port() -> u16 {
-    8080
-}
-fn default_redis() -> String {
-    "redis://127.0.0.1/".to_owned()
-}
-fn default_redis_channel() -> String {
-    "chats".to_owned()
-}
-  
-#[derive(Deserialize, Debug, Clone)]
-pub struct Config {
-    #[serde(default="default_redis")]
-    pub redis_url: String,
-    #[serde(default="default_port")]
-    pub port: u16,
-    #[serde(default="default_redis_channel")]
-    pub redis_channel: String,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self { redis_url: default_redis(), port: default_port(), redis_channel: default_redis_channel() }
     }
 }

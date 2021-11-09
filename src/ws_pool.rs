@@ -1,20 +1,40 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::{HashMap, HashSet}, pin::Pin, sync::Arc};
+use async_trait::async_trait;
 
-use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedReceiver, UnboundedSender}, lock::Mutex, stream::{SelectAll, select_all}};
+use futures::{SinkExt, Stream, StreamExt, channel::mpsc::{UnboundedReceiver, UnboundedSender}, lock::Mutex, stream::{SelectAll, select_all}};
 
-use warp::{ws::Message, Error};
+use warp::{Error, ws::{Message, WebSocket}};
 
-use crate::{chat_service::ChatService, models::{AddDevice, DeviceId, Item, PublishedMessage, ReceiverStream, SendMessageInChat, SenderStream, WsContext}};
+use crate::{chat_service::ChatService, models::{AddDevice, DeviceId, Item, PublishedMessage, ReceiverStream, SendMessageInChat, SenderStream, WsContext, MessageSender}};
 
 trait GetId {
     fn get_id(&self) -> &DeviceId;
 }
 
+#[async_trait]
+impl MessageSender for futures::stream::SplitSink<WebSocket, Message> {
+    async fn send_message(&mut self, msg: Arc<PublishedMessage>) -> Result<(), ()> {
+        let text = match serde_json::to_string(&msg) {
+            // That's not so ok. Anyway we ignore serialization errors
+            Err(e) => {
+                error!("Error in serialization published message {:?}", e);
+                return Ok(())
+            },
+            Ok(text) => text,
+        };
+        self.send(Message::text(text)).await.map_err(|_| ())?;
+        Ok(())
+    }
+}
+
+
 pub struct WsPool {
+    // All WebSocket (the read side) will be added into that stream
+    // In this way we cal poll just from this for actually polling
+    // from the whole connected websocketin a simplest way
     incoming_streams: SelectAll<ReceiverStream>,
+    // Store which DeviceId has which sender in order to identify
+    // which websocket is identified by which DeviceId
     devices: HashMap<DeviceId, SenderStream>,
 }
 
@@ -31,15 +51,28 @@ impl WsPool {
         }
     }
 
-    // TODO: move into a trait?
+    /// Converts device_ids into WebSocket and sends message to them
     pub async fn send_message_to(&mut self, device_ids: HashSet<DeviceId>, msg: PublishedMessage) {
-        // TODO: use send_all for better performance
+        info!("send message to devices {:?}", device_ids);
+
+        // Avoid cloning the whole structure. Just a "pointer"
+        let msg = Arc::new(msg);
+
         for device_id in device_ids {
-            let device = self
+            let device = match self
                 .devices
-                .get_mut(&device_id)
-                .expect("device_id not found");
-            device.send_message(msg.clone()).await;
+                .get_mut(&device_id) {
+                    // This can happen if a device goes away in the mean time
+                    // the ChatService "cloned"s device_ids and WsPool sends data
+                    None => continue,
+                    Some(device) => device
+            };
+
+            // if the sending fails, we want to remove the device 
+            match device.send_message(msg.clone()).await {
+                Ok(_) => {},
+                Err(_) => self.remove_device(&device_id).await,
+            };
         }
     }
 
@@ -56,7 +89,7 @@ impl WsPool {
 
         self.devices.remove(device_id);
 
-        // This can be written better
+        // This can be written better for avoiding the iteration among all WebSocket
         let new = SelectAll::new();
         let old_new = std::mem::replace(&mut self.incoming_streams, new);
         for s in old_new {
@@ -163,4 +196,29 @@ async fn remove_device(
     }
 
     Some(Item::RemoveDevice(socket_context.device_id.clone()))
+}
+
+impl ReceiverStream {
+    pub fn new(
+        device_id: DeviceId,
+        stream: Pin<Box<dyn Stream<Item = Item> + Send + 'static>>,
+    ) -> Self {
+        Self(device_id, stream)
+    }
+}
+
+impl Stream for ReceiverStream {
+    type Item = Item;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.1.poll_next_unpin(cx)
+    }
+}
+impl ReceiverStream {
+    pub fn get_id(&self) -> &DeviceId {
+        &self.0
+    }
 }

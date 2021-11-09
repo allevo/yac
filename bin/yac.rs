@@ -1,4 +1,4 @@
-use yac::{models::Config, start};
+use yac::{config::Config, start};
 
 
 #[tokio::main]

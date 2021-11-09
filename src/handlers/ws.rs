@@ -55,17 +55,6 @@ pub async fn ws(
         .into_response())
 }
 
-#[async_trait]
-impl MessageSender for futures::stream::SplitSink<WebSocket, Message> {
-    async fn send_message(&mut self, msg: PublishedMessage) {
-        let text = serde_json::to_string(&msg).expect("");
-        match self.send(Message::text(text)).await {
-            Ok(()) => info!("Message sent!"),
-            Err(e) => error!("Message not delivered: {}", e),
-        };
-    }
-}
-
 async fn user_connected(
     ws: WebSocket,
     chat_service: Arc<Mutex<ChatService>>,

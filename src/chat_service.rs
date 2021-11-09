@@ -16,13 +16,18 @@ use crate::models::*;
 pub enum ChatServiceError {
     ChatNotFound,
     YouAreNotAPartecipant,
+    PermissionError,
 }
 
 pub struct ChatService {
+    // Update the links between devices and users:
+    // - one user can have multiple devices
+    // - one device can belong to a unique user
     user_devices: HashMap<UserId, HashSet<DeviceId>>,
+    // Track id -> Chat
+    chats: HashMap<ChatId, Chat>,
     item_sender: UnboundedSender<Item>,
     chat_id_generator: HyperId,
-    chats: HashMap<ChatId, Chat>,
 }
 
 impl ChatService {
@@ -44,8 +49,9 @@ impl ChatService {
         creator: UserId,
         name: String,
     ) -> Result<Chat, ChatServiceError> {
+        let chat_id = self.chat_id_generator.generate().to_url_safe();
         let chat = Chat {
-            id: self.chat_id_generator.generate().to_url_safe().into(),
+            id: chat_id.into(),
             creator,
             name,
             user_ids: HashSet::new(),
@@ -57,11 +63,21 @@ impl ChatService {
 
     pub async fn join_chat(
         &mut self,
+        auth_user_id: UserId,
         user_id: UserId,
         add_to_chat: AddToChat,
     ) -> Result<(), ChatServiceError> {
         info!("user {:?} join chat {:?}", user_id, add_to_chat);
 
+        // This logic could be more complicate:ù
+        // can I add another user to a chat?
+        // When it could be possibile?
+        // For example I can invite another user to chat
+        if auth_user_id != user_id {
+            return Err(ChatServiceError::PermissionError);
+        }
+
+        // Find the chat with the right id
         let chat = match self.chats.get_mut(&add_to_chat.chat_id) {
             Some(chat) => chat,
             None => return Err(ChatServiceError::ChatNotFound),
@@ -73,11 +89,21 @@ impl ChatService {
 
     pub async fn disjoin_chat(
         &mut self,
+        auth_user_id: UserId,
         user_id: UserId,
         remove_from_chat: RemoveFromChat,
     ) -> Result<(), ChatServiceError> {
         info!("disjoin chat {:?}, {:?}", user_id, remove_from_chat);
 
+        // This logic could be more complicate:ù
+        // can I remove another user to a chat?
+        // When it could be possibile?
+        // For example I can remove a user for moderation stuff
+        if auth_user_id != user_id {
+            return Err(ChatServiceError::PermissionError);
+        }
+
+        // Find the chat with the right id
         let chat = match self.chats.get_mut(&remove_from_chat.chat_id) {
             Some(chat) => chat,
             None => return Err(ChatServiceError::ChatNotFound),
@@ -107,6 +133,7 @@ impl ChatService {
         Ok(())
     }
 
+    /// Find a chat, know which users join inside that chat, find all users' devices and ask to ws_pool to send message the them
     pub async fn send_message(
         &mut self,
         context: Arc<WsContext>,
@@ -129,6 +156,7 @@ impl ChatService {
             .iter()
             .filter_map(|user_id| self.user_devices.get(user_id))
             .flatten()
+            // Dump which devices are now connected
             .cloned()
             .collect();
 
