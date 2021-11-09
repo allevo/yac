@@ -7,7 +7,11 @@ use crate::{
     models::UserId,
 };
 
-use warp::{self, Filter, Rejection, http::{HeaderValue, header::AUTHORIZATION}, reject};
+use warp::{
+    self,
+    http::{header::AUTHORIZATION, HeaderValue},
+    reject, Filter, Rejection,
+};
 
 /// Used for parsing the Authorization header
 pub fn resolve_jwt(

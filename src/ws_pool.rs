@@ -1,11 +1,29 @@
-use std::{collections::{HashMap, HashSet}, pin::Pin, sync::Arc};
 use async_trait::async_trait;
+use std::{
+    collections::{HashMap, HashSet},
+    pin::Pin,
+    sync::Arc,
+};
 
-use futures::{SinkExt, Stream, StreamExt, channel::mpsc::{UnboundedReceiver, UnboundedSender}, lock::Mutex, stream::{SelectAll, select_all}};
+use futures::{
+    channel::mpsc::{UnboundedReceiver, UnboundedSender},
+    lock::Mutex,
+    stream::{select_all, SelectAll},
+    SinkExt, Stream, StreamExt,
+};
 
-use warp::{Error, ws::{Message, WebSocket}};
+use warp::{
+    ws::{Message, WebSocket},
+    Error,
+};
 
-use crate::{chat_service::ChatService, models::{AddDevice, DeviceId, Item, PublishedMessage, ReceiverStream, SendMessageInChat, SenderStream, WsContext, MessageSender}};
+use crate::{
+    chat_service::ChatService,
+    models::{
+        AddDevice, DeviceId, Item, MessageSender, PublishedMessage, ReceiverStream,
+        SendMessageInChat, SenderStream, WsContext,
+    },
+};
 
 trait GetId {
     fn get_id(&self) -> &DeviceId;
@@ -18,15 +36,14 @@ impl MessageSender for futures::stream::SplitSink<WebSocket, Message> {
             // That's not so ok. Anyway we ignore serialization errors
             Err(e) => {
                 error!("Error in serialization published message {:?}", e);
-                return Ok(())
-            },
+                return Ok(());
+            }
             Ok(text) => text,
         };
         self.send(Message::text(text)).await.map_err(|_| ())?;
         Ok(())
     }
 }
-
 
 pub struct WsPool {
     // All WebSocket (the read side) will be added into that stream
@@ -59,18 +76,16 @@ impl WsPool {
         let msg = Arc::new(msg);
 
         for device_id in device_ids {
-            let device = match self
-                .devices
-                .get_mut(&device_id) {
-                    // This can happen if a device goes away in the mean time
-                    // the ChatService "cloned"s device_ids and WsPool sends data
-                    None => continue,
-                    Some(device) => device
+            let device = match self.devices.get_mut(&device_id) {
+                // This can happen if a device goes away in the mean time
+                // the ChatService "cloned"s device_ids and WsPool sends data
+                None => continue,
+                Some(device) => device,
             };
 
-            // if the sending fails, we want to remove the device 
+            // if the sending fails, we want to remove the device
             match device.send_message(msg.clone()).await {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(_) => self.remove_device(&device_id).await,
             };
         }
@@ -94,7 +109,7 @@ impl WsPool {
         let old_new = std::mem::replace(&mut self.incoming_streams, new);
         for s in old_new {
             if s.get_id() == device_id {
-                continue
+                continue;
             }
             self.incoming_streams.push(s);
         }
@@ -114,8 +129,8 @@ pub async fn process_ws_pool(
             None => {
                 warn!("Pulled None from stream");
                 // There's no receiver anymore
-                break
-            },
+                break;
+            }
             Some(Item::SendMessageInChat(context, event)) => {
                 info!("SendMessageInChat {:?} {:?}", context, event);
 

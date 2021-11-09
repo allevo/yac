@@ -215,7 +215,7 @@ pub async fn process_chat(
                 // The sender side is destroyed:
                 // that means we are not able to fetch from this receiver anymore
                 // So we need to stop this process!
-                break
+                break;
             }
             Some((context, smic)) => {
                 let mut chat_service = chat_service.lock().await;

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::Stream;
 use std::{collections::HashSet, fmt::Debug, pin::Pin, str::FromStr, sync::Arc};
 
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,10 @@ pub trait MessageSender {
 
 pub type SenderStream = Box<dyn MessageSender + Send + 'static>;
 
-pub struct ReceiverStream(pub DeviceId, pub Pin<Box<dyn Stream<Item = Item> + Send + 'static>>);
+pub struct ReceiverStream(
+    pub DeviceId,
+    pub Pin<Box<dyn Stream<Item = Item> + Send + 'static>>,
+);
 
 #[derive(Debug)]
 pub enum Item {

@@ -6,18 +6,11 @@ use hyperid::HyperId;
 use crate::{
     chat_service::ChatService,
     credential_service::CredentialService,
-    models::{
-        AddDevice, DeviceId, Item, MessageSender, PublishedMessage, ReceiverStream, UserId,
-        WsContext,
-    },
+    models::{AddDevice, DeviceId, Item, ReceiverStream, UserId, WsContext},
     ws_pool::handle_event,
 };
-use async_trait::async_trait;
-use warp::{
-    self,
-    ws::{Message, WebSocket},
-    Rejection, Reply,
-};
+
+use warp::{self, ws::WebSocket, Rejection, Reply};
 
 use serde::Deserialize;
 

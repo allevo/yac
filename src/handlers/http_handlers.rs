@@ -22,7 +22,6 @@ pub async fn login(
     Ok(LoginResponse { user_id, jwt })
 }
 
-
 /// Returns the list of the chats
 pub async fn get_chats(
     _: UserId,
@@ -59,7 +58,9 @@ pub async fn join_chat(
 ) -> Result<impl warp::Reply, Rejection> {
     let mut chat_service = chat_service.lock().await;
     let add_to_chat = AddToChat { chat_id };
-    chat_service.join_chat(auth_user_id, user_id, add_to_chat).await?;
+    chat_service
+        .join_chat(auth_user_id, user_id, add_to_chat)
+        .await?;
 
     Ok(warp::reply::with_status("", StatusCode::NO_CONTENT))
 }
@@ -73,7 +74,9 @@ pub async fn disjoin_chat(
 ) -> Result<impl warp::Reply, Rejection> {
     let mut chat_service = chat_service.lock().await;
     let remove_from_chat = RemoveFromChat { chat_id };
-    chat_service.disjoin_chat(auth_user_id, user_id, remove_from_chat).await?;
+    chat_service
+        .disjoin_chat(auth_user_id, user_id, remove_from_chat)
+        .await?;
 
     Ok(warp::reply::with_status("", StatusCode::NO_CONTENT))
 }
@@ -117,7 +120,6 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
 
     Ok(warp::reply::with_status(json, code))
 }
-
 
 #[cfg_attr(test, derive(Serialize))]
 #[derive(Deserialize)]

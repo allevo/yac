@@ -12,22 +12,25 @@ use warp::Filter;
 use ws_pool::WsPool;
 
 use crate::chat_service::{process_chat, ChatService};
-use crate::models::*;
 use crate::config::Config;
 use crate::handlers::get_router;
+use crate::models::*;
 use crate::ws_pool::process_ws_pool;
 
 #[macro_use]
 extern crate log;
 
 mod chat_service;
-mod credential_service;
-mod models;
-mod handlers;
-mod ws_pool;
 pub mod config;
+mod credential_service;
+mod handlers;
+mod models;
+mod ws_pool;
 
-fn from_redis(mut from_redis_sender: UnboundedSender<(Arc<WsContext>, SendMessageInChat)>, config: Config) -> Result<(), RedisError> {
+fn from_redis(
+    mut from_redis_sender: UnboundedSender<(Arc<WsContext>, SendMessageInChat)>,
+    config: Config,
+) -> Result<(), RedisError> {
     info!("starting subscribing {:?}", config);
 
     let client = redis::Client::open(config.redis_url)?;
@@ -45,16 +48,18 @@ fn from_redis(mut from_redis_sender: UnboundedSender<(Arc<WsContext>, SendMessag
             serde_json::from_str(&payload).unwrap();
         let ws_context = Arc::new(ws_context);
 
-        let r = runtime
-            .block_on(from_redis_sender.send((ws_context, smic)));
-        
+        let r = runtime.block_on(from_redis_sender.send((ws_context, smic)));
+
         if let Err(e) = r {
             error!("Error on sending from_redis_sender {:?}", e);
         }
     }
 }
 
-async fn to_redis(mut to_redis_receiver: UnboundedReceiver<(Arc<WsContext>, SendMessageInChat)>, config: Config) {
+async fn to_redis(
+    mut to_redis_receiver: UnboundedReceiver<(Arc<WsContext>, SendMessageInChat)>,
+    config: Config,
+) {
     info!("starting to_redis {:?}", config);
 
     let client = redis::Client::open(config.redis_url).unwrap();
@@ -167,8 +172,8 @@ mod tests {
 
     use crate::{
         chat_service::Chat,
-        models::{PublishedMessage, SendMessageInChat},
         handlers::http_handlers::{CreateChatRequest, LoginRequest, LoginResponse},
+        models::{PublishedMessage, SendMessageInChat},
     };
 
     use super::*;

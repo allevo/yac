@@ -82,7 +82,7 @@ impl CredentialService {
         )
         .or(Err(CredentialServiceError::InvalidJWT))?;
 
-        Ok(token.claims.sub.into())
+        Ok(token.claims.sub)
     }
 }
 
