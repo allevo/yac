@@ -30,7 +30,7 @@ jobs:
       run: cargo test --verbose
       env:
         # The hostname used to communicate with the Redis service container
-        REDIS_URL: 'redis://redis:6379'
+        REDIS_URL: 'redis://redis:6379/'
         RUST_LOG: 'info'
     - name: Build
       run: cargo build --verbose
